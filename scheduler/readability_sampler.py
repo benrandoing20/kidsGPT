@@ -6,8 +6,8 @@ class CurriculumSampler(torch.utils.data.Sampler):
         self.epoch = epoch
         self.total_epochs = total_epochs
 
-        max_grade = int((epoch / (total_epochs - 1)) * 12)
-        self.allowed = [i for i, g in enumerate(grades) if g <= max_grade]
+        self.max_grade = int((epoch / (total_epochs - 1)) * 12)
+        self.allowed = [i for i, g in enumerate(grades) if g <= self.max_grade]
 
     def __iter__(self):
         random.shuffle(self.allowed)

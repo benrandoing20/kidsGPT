@@ -3,9 +3,9 @@ import re
 
 out = open("scrape/storybooks_kids.txt", "w", encoding="utf-8")
 
-for file in os.listdir("scrape/storybooks/en/"):
+for file in os.listdir("scrape/sbc-source/en/"):
     if file.endswith(".md"):
-        with open(f"scrape/storybooks/en/{file}", "r", encoding="utf-8") as f:
+        with open(f"scrape/sbc-source/en/{file}", "r", encoding="utf-8") as f:
             content = f.read()
             
             # Split into lines and process

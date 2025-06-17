@@ -1,7 +1,14 @@
 scrape/simplewiki_kids.txt
 scrape/storybooks_kids.txt
 scrape/gutenberg_kids.txt
-scrape/all_kid_corpus.txt
+scrape/all_kids_corpus.txt
 scrape/storybooks
 data/data.jsonl
 tokenizer/tokenizer.json
+scrape/sbc-source/
+texts/
+train/.ipynb_checkpoints
+data/.ipynb_checkpoints
+scrape/.ipynb_checkpoints
+train/__pycache__/
+scheduler/__pycache__/
