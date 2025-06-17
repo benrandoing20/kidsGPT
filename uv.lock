@@ -425,7 +425,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gradio", specifier = ">=4.0.0" },
+    { name = "gradio", specifier = ">=5.34.0" },
     { name = "gutenbergpy", specifier = ">=0.3.5" },
     { name = "numpy", specifier = ">=2.3.0" },
     { name = "textstat", specifier = ">=0.7.7" },
