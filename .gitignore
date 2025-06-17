@@ -5,3 +5,4 @@ scrape/all_kid_corpus.txt
 scrape/storybooks
 data/data.jsonl
 tokenizer/tokenizer.json
+scrape/sbc-source/
