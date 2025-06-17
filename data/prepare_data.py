@@ -12,4 +12,4 @@ def preprocess(input_txt, output_jsonl, max_grade=8):
             fout.write(json.dumps({"text": t, "grade": round(min(12, max(0, grade)))}) + "\n")
 
 if __name__ == "__main__":
-    preprocess("scrape/all_kid_corpus.txt", "data/data.jsonl")
+    preprocess("scrape/all_kids_corpus.txt", "data/data.jsonl")
