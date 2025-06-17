@@ -185,5 +185,10 @@ def main():
             plt.close()
             print(f"Loss plot saved: checkpoints/loss_plot_epoch_{ep}.png")
 
+    # Save the trained model
+    print("Training completed! Saving model...")
+    torch.save(model.state_dict(), "kidgpt.pt")
+    print("Model saved to kidgpt.pt")
+
 if __name__ == "__main__":
     main()
