@@ -140,4 +140,9 @@ iface = gr.Interface(
 
 # Launch the interface
 if __name__ == "__main__":
-    iface.launch(share=True)
+    iface.launch(
+        server_name="0.0.0.0",  # Allow external connections
+        server_port=7860,       # Default Gradio port
+        share=True,             # Keep share for public URL if needed
+        debug=False
+    )

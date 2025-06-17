@@ -1,11 +1,11 @@
-from model import GPT2Simple
+from model.model import GPT2Simple
 from tokenizers import Tokenizer
 import torch
 
-model = GPT2Simple(vocab_size=50257)
+model = GPT2Simple(vocab_size=23025)
 model.load_state_dict(torch.load("kidgpt.pt"))
 model.eval()
-tok = Tokenizer.from_file("tokenizer.json")
+tok = Tokenizer.from_file("tokenizer/tokenizer.json")
 
 prompt = "<s_grade=3> What is gravity?"
 ids = tok.encode(prompt).ids
