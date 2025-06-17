@@ -208,6 +208,7 @@ dependencies = [
     { name = "textstat" },
     { name = "tokenizers" },
     { name = "torch" },
+    { name = "tqdm" },
     { name = "wikipedia-api" },
 ]
 
@@ -217,6 +218,7 @@ requires-dist = [
     { name = "textstat", specifier = ">=0.7.7" },
     { name = "tokenizers", specifier = ">=0.21.1" },
     { name = "torch", specifier = ">=2.7.1" },
+    { name = "tqdm", specifier = ">=4.67.1" },
     { name = "wikipedia-api", specifier = ">=0.8.1" },
 ]
 
