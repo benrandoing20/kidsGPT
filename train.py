@@ -263,7 +263,7 @@ def main():
     print(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
     
     # Optimizer and scaler
-    opt = torch.optim.AdamW(model.parameters(), lr=3e-4)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
     scaler = torch.amp.GradScaler('cuda') if device.type == "cuda" else None
 
     # Loss tracking
