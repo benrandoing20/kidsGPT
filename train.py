@@ -215,6 +215,252 @@ def visualize_data_distribution(dataset, num_samples=100, max_display_samples=20
         'length_variance': max_length / avg_length
     }
 
+def visualize_collate_effects(dataset, collate_fn, num_batches=10, batch_size=4):
+    """
+    Visualize how the collate function affects the data by showing padding effects.
+    
+    Args:
+        dataset: The KidDataset instance
+        collate_fn: The collate function to analyze
+        num_batches: Number of batches to analyze
+        batch_size: Batch size to use
+    """
+    print(f"\n=== Collate Function Analysis ===")
+    
+    # Create a simple dataloader to get batches
+    from torch.utils.data import DataLoader
+    dl = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    
+    # Statistics tracking
+    original_lengths = []
+    padded_lengths = []
+    padding_ratios = []
+    batch_efficiency = []
+    
+    # Sample some batches for detailed analysis
+    batch_samples = []
+    
+    for batch_idx, (xb, yb) in enumerate(dl):
+        if batch_idx >= num_batches:
+            break
+            
+        # Get original lengths before padding
+        original_batch_lengths = []
+        for i in range(batch_size):
+            if i < len(dataset):
+                x_orig, y_orig = dataset[i]
+                original_batch_lengths.append(len(x_orig))
+        
+        # Calculate padding statistics
+        batch_max_len = xb.shape[1]
+        batch_padding_ratios = []
+        
+        for orig_len in original_batch_lengths:
+            padding_len = batch_max_len - orig_len
+            padding_ratio = padding_len / batch_max_len if batch_max_len > 0 else 0
+            batch_padding_ratios.append(padding_ratio)
+        
+        # Store statistics
+        original_lengths.extend(original_batch_lengths)
+        padded_lengths.extend([batch_max_len] * len(original_batch_lengths))
+        padding_ratios.extend(batch_padding_ratios)
+        
+        # Calculate batch efficiency (how much of the batch is actual content)
+        batch_efficiency.append(1 - np.mean(batch_padding_ratios))
+        
+        # Store detailed batch info for visualization
+        batch_samples.append({
+            'batch_idx': batch_idx,
+            'original_lengths': original_batch_lengths,
+            'padded_length': batch_max_len,
+            'padding_ratios': batch_padding_ratios,
+            'efficiency': batch_efficiency[-1],
+            'xb_shape': xb.shape,
+            'yb_shape': yb.shape
+        })
+    
+    # Calculate overall statistics
+    avg_original_length = np.mean(original_lengths)
+    avg_padded_length = np.mean(padded_lengths)
+    avg_padding_ratio = np.mean(padding_ratios)
+    avg_batch_efficiency = np.mean(batch_efficiency)
+    
+    print(f"Collate Function Statistics:")
+    print(f"  Average original length: {avg_original_length:.1f}")
+    print(f"  Average padded length: {avg_padded_length:.1f}")
+    print(f"  Average padding ratio: {avg_padding_ratio:.2%}")
+    print(f"  Average batch efficiency: {avg_batch_efficiency:.2%}")
+    print(f"  Length expansion factor: {avg_padded_length/avg_original_length:.2f}x")
+    
+    # Create comprehensive visualization
+    fig = plt.figure(figsize=(20, 16))
+    
+    # 1. Before/After length comparison
+    ax1 = plt.subplot(3, 3, 1)
+    x_pos = np.arange(len(original_lengths))
+    ax1.bar(x_pos - 0.2, original_lengths, 0.4, label='Original Length', alpha=0.7, color='skyblue')
+    ax1.bar(x_pos + 0.2, padded_lengths, 0.4, label='Padded Length', alpha=0.7, color='lightcoral')
+    ax1.set_xlabel('Sample Index')
+    ax1.set_ylabel('Sequence Length')
+    ax1.set_title('Original vs Padded Lengths')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Padding ratio distribution
+    ax2 = plt.subplot(3, 3, 2)
+    ax2.hist(padding_ratios, bins=20, alpha=0.7, color='orange', edgecolor='black')
+    ax2.axvline(avg_padding_ratio, color='red', linestyle='--', label=f'Mean: {avg_padding_ratio:.2%}')
+    ax2.set_xlabel('Padding Ratio')
+    ax2.set_ylabel('Frequency')
+    ax2.set_title('Distribution of Padding Ratios')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. Batch efficiency over batches
+    ax3 = plt.subplot(3, 3, 3)
+    batch_indices = [b['batch_idx'] for b in batch_samples]
+    ax3.plot(batch_indices, batch_efficiency, 'o-', color='green', linewidth=2, markersize=6)
+    ax3.axhline(avg_batch_efficiency, color='red', linestyle='--', label=f'Mean: {avg_batch_efficiency:.2%}')
+    ax3.set_xlabel('Batch Index')
+    ax3.set_ylabel('Batch Efficiency')
+    ax3.set_title('Batch Efficiency Over Time')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Detailed batch analysis heatmap
+    ax4 = plt.subplot(3, 3, 4)
+    # Create a heatmap showing padding for each sample in each batch
+    max_samples = max(len(b['original_lengths']) for b in batch_samples)
+    heatmap_data = np.zeros((max_samples, len(batch_samples)))
+    
+    for batch_idx, batch in enumerate(batch_samples):
+        for sample_idx, padding_ratio in enumerate(batch['padding_ratios']):
+            if sample_idx < max_samples:
+                heatmap_data[sample_idx, batch_idx] = padding_ratio
+    
+    im = ax4.imshow(heatmap_data, cmap='Reds', aspect='auto', vmin=0, vmax=1)
+    ax4.set_xlabel('Batch Index')
+    ax4.set_ylabel('Sample Index in Batch')
+    ax4.set_title('Padding Ratio Heatmap by Batch')
+    ax4.set_xticks(range(len(batch_samples)))
+    ax4.set_xticklabels([f'B{i}' for i in range(len(batch_samples))])
+    ax4.set_yticks(range(max_samples))
+    ax4.set_yticklabels([f'S{i+1}' for i in range(max_samples)])
+    
+    cbar = plt.colorbar(im, ax=ax4)
+    cbar.set_label('Padding Ratio')
+    
+    # 5. Memory usage analysis
+    ax5 = plt.subplot(3, 3, 5)
+    original_memory = [sum(b['original_lengths']) for b in batch_samples]
+    padded_memory = [b['padded_length'] * len(b['original_lengths']) for b in batch_samples]
+    memory_efficiency = [orig / pad for orig, pad in zip(original_memory, padded_memory)]
+    
+    x_pos = np.arange(len(batch_samples))
+    ax5.bar(x_pos - 0.2, original_memory, 0.4, label='Original Memory', alpha=0.7, color='lightblue')
+    ax5.bar(x_pos + 0.2, padded_memory, 0.4, label='Padded Memory', alpha=0.7, color='lightpink')
+    ax5.set_xlabel('Batch Index')
+    ax5.set_ylabel('Total Tokens')
+    ax5.set_title('Memory Usage: Original vs Padded')
+    ax5.legend()
+    ax5.grid(True, alpha=0.3)
+    
+    # 6. Memory efficiency
+    ax6 = plt.subplot(3, 3, 6)
+    ax6.plot(batch_indices, memory_efficiency, 'o-', color='purple', linewidth=2, markersize=6)
+    ax6.axhline(np.mean(memory_efficiency), color='red', linestyle='--', label=f'Mean: {np.mean(memory_efficiency):.2%}')
+    ax6.set_xlabel('Batch Index')
+    ax6.set_ylabel('Memory Efficiency')
+    ax6.set_title('Memory Efficiency Over Batches')
+    ax6.legend()
+    ax6.grid(True, alpha=0.3)
+    
+    # 7. Length distribution comparison
+    ax7 = plt.subplot(3, 3, 7)
+    ax7.hist(original_lengths, bins=20, alpha=0.5, label='Original', color='blue', density=True)
+    ax7.hist(padded_lengths, bins=20, alpha=0.5, label='Padded', color='red', density=True)
+    ax7.set_xlabel('Sequence Length')
+    ax7.set_ylabel('Density')
+    ax7.set_title('Length Distribution Comparison')
+    ax7.legend()
+    ax7.grid(True, alpha=0.3)
+    
+    # 8. Batch size vs efficiency scatter
+    ax8 = plt.subplot(3, 3, 8)
+    batch_sizes = [len(b['original_lengths']) for b in batch_samples]
+    ax8.scatter(batch_sizes, batch_efficiency, c=padding_ratios, cmap='viridis', s=100, alpha=0.7)
+    ax8.set_xlabel('Batch Size')
+    ax8.set_ylabel('Batch Efficiency')
+    ax8.set_title('Batch Size vs Efficiency')
+    ax8.grid(True, alpha=0.3)
+    
+    # Add colorbar for padding ratio
+    scatter = ax8.scatter([], [], c=[], cmap='viridis')
+    cbar = plt.colorbar(scatter, ax=ax8)
+    cbar.set_label('Padding Ratio')
+    
+    # 9. Summary statistics table
+    ax9 = plt.subplot(3, 3, 9)
+    ax9.axis('off')
+    
+    stats_text = f"""
+    Collate Function Analysis Summary:
+    
+    Original Data:
+    • Avg Length: {avg_original_length:.1f}
+    • Min Length: {min(original_lengths)}
+    • Max Length: {max(original_lengths)}
+    
+    After Padding:
+    • Avg Length: {avg_padded_length:.1f}
+    • Padding Ratio: {avg_padding_ratio:.2%}
+    • Memory Expansion: {avg_padded_length/avg_original_length:.2f}x
+    
+    Efficiency:
+    • Batch Efficiency: {avg_batch_efficiency:.2%}
+    • Memory Efficiency: {np.mean(memory_efficiency):.2%}
+    
+    Recommendations:
+    """
+    
+    if avg_padding_ratio > 0.5:
+        stats_text += "⚠️ High padding ratio - consider dynamic padding"
+    elif avg_padding_ratio > 0.3:
+        stats_text += "⚠️ Moderate padding - consider bucketing"
+    else:
+        stats_text += "✅ Padding looks reasonable"
+    
+    if avg_padded_length/avg_original_length > 2:
+        stats_text += "\n⚠️ High memory expansion - consider smaller block_size"
+    
+    ax9.text(0.05, 0.95, stats_text, transform=ax9.transAxes, fontsize=10,
+             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+    
+    plt.tight_layout()
+    plt.savefig('checkpoints/collate_function_analysis.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"\nCollate function analysis saved to: checkpoints/collate_function_analysis.png")
+    
+    # Print detailed batch information
+    print(f"\n=== Detailed Batch Analysis ===")
+    for batch in batch_samples[:5]:  # Show first 5 batches
+        print(f"Batch {batch['batch_idx']}:")
+        print(f"  Original lengths: {batch['original_lengths']}")
+        print(f"  Padded length: {batch['padded_length']}")
+        print(f"  Padding ratios: {[f'{r:.2%}' for r in batch['padding_ratios']]}")
+        print(f"  Efficiency: {batch['efficiency']:.2%}")
+        print(f"  Shapes: xb={batch['xb_shape']}, yb={batch['yb_shape']}")
+        print()
+    
+    return {
+        'avg_original_length': avg_original_length,
+        'avg_padded_length': avg_padded_length,
+        'avg_padding_ratio': avg_padding_ratio,
+        'avg_batch_efficiency': avg_batch_efficiency,
+        'memory_expansion': avg_padded_length/avg_original_length
+    }
+
 def main():
     # Check if CUDA is available and set device
     if torch.cuda.is_available():
@@ -249,6 +495,9 @@ def main():
     
     # Visualize data distribution and padding
     data_stats = visualize_data_distribution(ds, num_samples=200, max_display_samples=25)
+    
+    # Analyze collate function effects
+    collate_stats = visualize_collate_effects(ds, collate_fn, num_batches=15, batch_size=4)
     
     # Create sampler and dataloader
     sampler = CurriculumSampler(ds.grades, epoch=0, total_epochs=10)
