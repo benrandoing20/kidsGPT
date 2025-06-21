@@ -182,11 +182,19 @@ def visualize_collate_effects(dataset, collate_fn, num_batches=10, batch_size=4)
             break
             
         # Get original lengths before padding
-        for i in range(batch_size):
-            if i < len(dataset):
-                x_orig, y_orig = dataset[i]
-                original_lengths.append(len(x_orig))
-                padded_lengths.append(xb.shape[1])
+        # We need to track which samples are in this batch
+        # Since we're using shuffle=True, we can't easily map back to original indices
+        # Instead, we'll just record the padded lengths for this batch
+        batch_size_actual = xb.shape[0]
+        for i in range(batch_size_actual):
+            padded_lengths.append(xb.shape[1])
+    
+    # For original lengths, we'll sample from the dataset directly
+    # since we can't easily map back from shuffled batches
+    sample_indices = np.random.choice(len(dataset), min(len(padded_lengths), len(dataset)), replace=False)
+    for idx in sample_indices:
+        x_orig, y_orig = dataset[idx]
+        original_lengths.append(len(x_orig))
     
     # Create single plot showing before/after lengths
     plt.figure(figsize=(12, 6))

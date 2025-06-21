@@ -6,8 +6,6 @@ from model.model import GPT2Simple
 from tokenizers import Tokenizer
 import matplotlib.pyplot as plt
 import numpy as np
-from collections import defaultdict
-import random
 
 # Import from new modules
 from dataset import KidDataset, collate_fn
@@ -70,73 +68,38 @@ def main():
     
     # Optimizer and scaler
     opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    scaler = torch.cuda.amp.GradScaler() if device.type == "cuda" else None
+    scaler = torch.amp.GradScaler('cuda') if device.type == "cuda" else None
 
     # Loss tracking
     all_losses = []
     epoch_losses = []
 
     for ep in range(10):
-        # Use bucketed sampler for better efficiency
-        sampler = BucketedSampler(ds, batch_size=4, num_buckets=10)
-        dl = DataLoader(ds, batch_size=4, sampler=sampler, collate_fn=collate_fn_with_masking)
+        sampler = CurriculumSampler(ds.grades, ep, 10)
+        dl = DataLoader(ds, batch_size=4, sampler=sampler, collate_fn=collate_fn)
         
         epoch_loss = 0
         batch_count = 0
         
-        for batch_idx, batch_data in enumerate(dl):
-            # Handle new collate function output
-            if len(batch_data) == 3:
-                xb, yb, attention_mask = batch_data
-            else:
-                xb, yb = batch_data
-                attention_mask = None
-                
+        for batch_idx, (xb, yb) in enumerate(dl):
             xb, yb = xb.to(device), yb.to(device)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
             
             # Print batch statistics occasionally
             if batch_idx % 50 == 0:
                 print(f"Epoch {ep}, Batch {batch_idx}: xb shape {xb.shape}, yb shape {yb.shape}")
-                if attention_mask is not None:
-                    print(f"  Attention mask shape: {attention_mask.shape}")
-                    print(f"  Active tokens per sample: {attention_mask.sum(dim=1).tolist()}")
                 print(f"  Sample tokens: {xb[0][:10].tolist()}")
                 print(f"  Target tokens: {yb[0][:10].tolist()}")
             
             if device.type == "cuda":
                 with torch.cuda.amp.autocast():
-                    logits = model(xb, attention_mask=attention_mask)
-                    # Use attention mask if available
-                    if attention_mask is not None:
-                        # Create loss mask to ignore padding tokens
-                        loss_mask = attention_mask.view(-1)
-                        # Flatten logits and targets
-                        logits_flat = logits.view(-1, logits.size(-1))
-                        targets_flat = yb.view(-1)
-                        # Apply mask to loss calculation
-                        loss = nn.CrossEntropyLoss(reduction='none')(logits_flat, targets_flat)
-                        loss = (loss * loss_mask).sum() / loss_mask.sum()
-                    else:
-                        loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), yb.view(-1))
+                    logits = model(xb)
+                    loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), yb.view(-1))
                 scaler.scale(loss).backward()
                 scaler.step(opt)
                 scaler.update()
             else:
-                logits = model(xb, attention_mask=attention_mask)
-                # Use attention mask if available
-                if attention_mask is not None:
-                    # Create loss mask to ignore padding tokens
-                    loss_mask = attention_mask.view(-1)
-                    # Flatten logits and targets
-                    logits_flat = logits.view(-1, logits.size(-1))
-                    targets_flat = yb.view(-1)
-                    # Apply mask to loss calculation
-                    loss = nn.CrossEntropyLoss(reduction='none')(logits_flat, targets_flat)
-                    loss = (loss * loss_mask).sum() / loss_mask.sum()
-                else:
-                    loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), yb.view(-1))
+                logits = model(xb)
+                loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), yb.view(-1))
                 loss.backward()
                 opt.step()
             
@@ -150,7 +113,7 @@ def main():
         avg_epoch_loss = epoch_loss / batch_count
         epoch_losses.append(avg_epoch_loss)
         
-        print(f"Epoch {ep} - Avg loss: {avg_epoch_loss:.4f} | batches: {batch_count}")
+        print(f"Epoch {ep} - Avg loss: {avg_epoch_loss:.4f} | max_grade: {sampler.max_grade} | batches: {batch_count}")
         
         # Save model after each epoch
         torch.save(model.state_dict(), f"checkpoints/kidgpt_epoch_{ep}.pt")

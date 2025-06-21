@@ -9,6 +9,7 @@ def collate_fn(batch):
     
     # Find the maximum length in this batch
     max_len = max(len(x) for x in x_batch)
+
     
     # Pad sequences to max_len
     x_padded = []
