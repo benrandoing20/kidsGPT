@@ -12,3 +12,4 @@ data/.ipynb_checkpoints
 scrape/.ipynb_checkpoints
 train/__pycache__/
 scheduler/__pycache__/
+.gradio/
