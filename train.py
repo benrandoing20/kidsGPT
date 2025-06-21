@@ -388,7 +388,8 @@ def visualize_collate_effects(dataset, collate_fn, num_batches=10, batch_size=4)
     # 8. Batch size vs efficiency scatter
     ax8 = plt.subplot(3, 3, 8)
     batch_sizes = [len(b['original_lengths']) for b in batch_samples]
-    ax8.scatter(batch_sizes, batch_efficiency, c=padding_ratios, cmap='viridis', s=100, alpha=0.7)
+    batch_padding_ratios = [np.mean(b['padding_ratios']) for b in batch_samples]  # Use batch-level padding ratios
+    ax8.scatter(batch_sizes, batch_efficiency, c=batch_padding_ratios, cmap='viridis', s=100, alpha=0.7)
     ax8.set_xlabel('Batch Size')
     ax8.set_ylabel('Batch Efficiency')
     ax8.set_title('Batch Size vs Efficiency')
@@ -397,7 +398,7 @@ def visualize_collate_effects(dataset, collate_fn, num_batches=10, batch_size=4)
     # Add colorbar for padding ratio
     scatter = ax8.scatter([], [], c=[], cmap='viridis')
     cbar = plt.colorbar(scatter, ax=ax8)
-    cbar.set_label('Padding Ratio')
+    cbar.set_label('Average Padding Ratio per Batch')
     
     # 9. Summary statistics table
     ax9 = plt.subplot(3, 3, 9)
