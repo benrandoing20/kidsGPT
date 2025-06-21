@@ -6,6 +6,8 @@ from model.model import GPT2Simple
 from tokenizers import Tokenizer
 import matplotlib.pyplot as plt
 import numpy as np
+from collections import defaultdict
+import random
 
 # Disable distributed training to avoid initialization errors
 os.environ['MASTER_ADDR'] = 'localhost'
@@ -16,13 +18,36 @@ os.environ['RANK'] = '0'
 # Create checkpoints directory if it doesn't exist
 os.makedirs('checkpoints', exist_ok=True)
 
-def collate_fn(batch):
-    """Custom collate function to pad sequences to the same length within a batch"""
+def create_attention_mask(sequence_lengths, max_len):
+    """
+    Create attention mask to ignore padding tokens.
+    
+    Args:
+        sequence_lengths: List of actual sequence lengths
+        max_len: Maximum length in the batch
+    
+    Returns:
+        attention_mask: Boolean tensor where True = attend, False = ignore
+    """
+    batch_size = len(sequence_lengths)
+    attention_mask = torch.zeros(batch_size, max_len, dtype=torch.bool)
+    
+    for i, seq_len in enumerate(sequence_lengths):
+        attention_mask[i, :seq_len] = True
+    
+    return attention_mask
+
+def collate_fn_with_masking(batch):
+    """
+    Modern collate function that uses attention masking instead of padding tokens.
+    This approach is similar to how GPT models handle variable-length sequences.
+    """
     # Separate x and y from the batch
     x_batch, y_batch = zip(*batch)
     
-    # Find the maximum length in this batch
-    max_len = max(len(x) for x in x_batch)
+    # Get original lengths
+    original_lengths = [len(x) for x in x_batch]
+    max_len = max(original_lengths)
     
     # Pad sequences to max_len
     x_padded = []
@@ -47,7 +72,63 @@ def collate_fn(batch):
     x_batch = torch.stack(x_padded)
     y_batch = torch.stack(y_padded)
     
-    return x_batch, y_batch
+    # Create attention mask
+    attention_mask = create_attention_mask(original_lengths, max_len)
+    
+    return x_batch, y_batch, attention_mask
+
+class BucketedSampler:
+    """
+    Sampler that groups sequences by length to minimize padding.
+    This is similar to how modern language models handle variable-length sequences.
+    """
+    def __init__(self, dataset, batch_size, num_buckets=10):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.num_buckets = num_buckets
+        
+        # Get sequence lengths
+        self.lengths = []
+        for i in range(len(dataset)):
+            x, y = dataset[i]
+            self.lengths.append(len(x))
+        
+        # Create buckets
+        self.buckets = self._create_buckets()
+        
+    def _create_buckets(self):
+        """Group indices by sequence length into buckets"""
+        # Sort indices by length
+        indices = list(range(len(self.dataset)))
+        indices.sort(key=lambda i: self.lengths[i])
+        
+        # Create buckets
+        bucket_size = len(indices) // self.num_buckets
+        buckets = []
+        
+        for i in range(0, len(indices), bucket_size):
+            bucket = indices[i:i + bucket_size]
+            if bucket:  # Only add non-empty buckets
+                buckets.append(bucket)
+        
+        return buckets
+    
+    def __iter__(self):
+        """Yield batches from buckets"""
+        # Shuffle buckets
+        random.shuffle(self.buckets)
+        
+        for bucket in self.buckets:
+            # Shuffle within bucket
+            random.shuffle(bucket)
+            
+            # Yield batches from this bucket
+            for i in range(0, len(bucket), self.batch_size):
+                batch_indices = bucket[i:i + self.batch_size]
+                yield from batch_indices
+    
+    def __len__(self):
+        return len(self.dataset)
 
 class KidDataset(Dataset):
     def __init__(self, path, tok, block_size=512):
@@ -240,9 +321,16 @@ def visualize_collate_effects(dataset, collate_fn, num_batches=10, batch_size=4)
     # Sample some batches for detailed analysis
     batch_samples = []
     
-    for batch_idx, (xb, yb) in enumerate(dl):
+    for batch_idx, batch_data in enumerate(dl):
         if batch_idx >= num_batches:
             break
+            
+        # Handle different collate function outputs
+        if len(batch_data) == 3:  # New collate function with attention mask
+            xb, yb, attention_mask = batch_data
+        else:  # Old collate function
+            xb, yb = batch_data
+            attention_mask = None
             
         # Get original lengths before padding
         original_batch_lengths = []
@@ -276,7 +364,8 @@ def visualize_collate_effects(dataset, collate_fn, num_batches=10, batch_size=4)
             'padding_ratios': batch_padding_ratios,
             'efficiency': batch_efficiency[-1],
             'xb_shape': xb.shape,
-            'yb_shape': yb.shape
+            'yb_shape': yb.shape,
+            'has_attention_mask': attention_mask is not None
         })
     
     # Calculate overall statistics
@@ -452,6 +541,7 @@ def visualize_collate_effects(dataset, collate_fn, num_batches=10, batch_size=4)
         print(f"  Padding ratios: {[f'{r:.2%}' for r in batch['padding_ratios']]}")
         print(f"  Efficiency: {batch['efficiency']:.2%}")
         print(f"  Shapes: xb={batch['xb_shape']}, yb={batch['yb_shape']}")
+        print(f"  Has attention mask: {batch['has_attention_mask']}")
         print()
     
     return {
@@ -497,14 +587,10 @@ def main():
     # Visualize data distribution and padding
     data_stats = visualize_data_distribution(ds, num_samples=200, max_display_samples=25)
     
-    # Analyze collate function effects
-    collate_stats = visualize_collate_effects(ds, collate_fn, num_batches=15, batch_size=4)
+    # Analyze collate function effects with new masking approach
+    collate_stats = visualize_collate_effects(ds, collate_fn_with_masking, num_batches=15, batch_size=4)
     
-    # Create sampler and dataloader
-    sampler = CurriculumSampler(ds.grades, epoch=0, total_epochs=10)
-    dl = DataLoader(ds, batch_size=4, sampler=sampler, collate_fn=collate_fn)
-    
-    # Create model
+    # Create model with attention masking support
     model = GPT2Simple(tok.get_vocab_size()).to(device)
     
     # Print model parameters
@@ -514,38 +600,73 @@ def main():
     
     # Optimizer and scaler
     opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    scaler = torch.amp.GradScaler('cuda') if device.type == "cuda" else None
+    scaler = torch.cuda.amp.GradScaler() if device.type == "cuda" else None
 
     # Loss tracking
     all_losses = []
     epoch_losses = []
 
     for ep in range(10):
-        sampler = CurriculumSampler(ds.grades, ep, 10)
-        dl = DataLoader(ds, batch_size=4, sampler=sampler, collate_fn=collate_fn)
+        # Use bucketed sampler for better efficiency
+        sampler = BucketedSampler(ds, batch_size=4, num_buckets=10)
+        dl = DataLoader(ds, batch_size=4, sampler=sampler, collate_fn=collate_fn_with_masking)
         
         epoch_loss = 0
         batch_count = 0
         
-        for batch_idx, (xb, yb) in enumerate(dl):
+        for batch_idx, batch_data in enumerate(dl):
+            # Handle new collate function output
+            if len(batch_data) == 3:
+                xb, yb, attention_mask = batch_data
+            else:
+                xb, yb = batch_data
+                attention_mask = None
+                
             xb, yb = xb.to(device), yb.to(device)
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(device)
             
             # Print batch statistics occasionally
             if batch_idx % 50 == 0:
                 print(f"Epoch {ep}, Batch {batch_idx}: xb shape {xb.shape}, yb shape {yb.shape}")
+                if attention_mask is not None:
+                    print(f"  Attention mask shape: {attention_mask.shape}")
+                    print(f"  Active tokens per sample: {attention_mask.sum(dim=1).tolist()}")
                 print(f"  Sample tokens: {xb[0][:10].tolist()}")
                 print(f"  Target tokens: {yb[0][:10].tolist()}")
             
             if device.type == "cuda":
                 with torch.cuda.amp.autocast():
-                    logits = model(xb)
-                    loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), yb.view(-1))
+                    logits = model(xb, attention_mask=attention_mask)
+                    # Use attention mask if available
+                    if attention_mask is not None:
+                        # Create loss mask to ignore padding tokens
+                        loss_mask = attention_mask.view(-1)
+                        # Flatten logits and targets
+                        logits_flat = logits.view(-1, logits.size(-1))
+                        targets_flat = yb.view(-1)
+                        # Apply mask to loss calculation
+                        loss = nn.CrossEntropyLoss(reduction='none')(logits_flat, targets_flat)
+                        loss = (loss * loss_mask).sum() / loss_mask.sum()
+                    else:
+                        loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), yb.view(-1))
                 scaler.scale(loss).backward()
                 scaler.step(opt)
                 scaler.update()
             else:
-                logits = model(xb)
-                loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), yb.view(-1))
+                logits = model(xb, attention_mask=attention_mask)
+                # Use attention mask if available
+                if attention_mask is not None:
+                    # Create loss mask to ignore padding tokens
+                    loss_mask = attention_mask.view(-1)
+                    # Flatten logits and targets
+                    logits_flat = logits.view(-1, logits.size(-1))
+                    targets_flat = yb.view(-1)
+                    # Apply mask to loss calculation
+                    loss = nn.CrossEntropyLoss(reduction='none')(logits_flat, targets_flat)
+                    loss = (loss * loss_mask).sum() / loss_mask.sum()
+                else:
+                    loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), yb.view(-1))
                 loss.backward()
                 opt.step()
             
@@ -559,7 +680,7 @@ def main():
         avg_epoch_loss = epoch_loss / batch_count
         epoch_losses.append(avg_epoch_loss)
         
-        print(f"Epoch {ep} - Avg loss: {avg_epoch_loss:.4f} | max_grade: {sampler.max_grade} | batches: {batch_count}")
+        print(f"Epoch {ep} - Avg loss: {avg_epoch_loss:.4f} | batches: {batch_count}")
         
         # Save model after each epoch
         torch.save(model.state_dict(), f"checkpoints/kidgpt_epoch_{ep}.pt")
